@@ -1,107 +1,101 @@
-# BrandDrive Assessment — Bug Findings & Fixes
+# Findings
 
-Below is a detailed breakdown of the bugs identified and resolved during the audit of both the backend and frontend components of the application.
+This document outlines the findings, root causes, impacts, fixes, and trade-offs of the audited codebase.
 
----
+## Backend
 
-## 1. Concurrency: Stock Allocation Race Condition
-* **Location:** `backend/src/services/ordersService.js` inside `createOrder`.
-* **Issue:** 
-  In the original implementation, checking a product's stock (`product.stock < item.quantity`) and decrementing the stock happened in separate queries outside of a database transaction. Under concurrent order requests for the same product, two processes could read the same initial stock, bypass the stock check, and subsequently decrement the stock into a negative value, resulting in stock corruption.
-  Furthermore, if an order contained multiple items and one item failed mid-transaction, previously decremented items were not rolled back, leading to a permanent stock leak.
-* **Fix:** 
-  1. Wrapped the entire order creation process in a transaction helper `withTransaction`.
-  2. Replaced the standard query `getProductById` with `getProductByIdForUpdate` to lock the product rows.
-  3. **Deadlock Prevention:** Sorted the items list by `productId` ascending before locking rows. Consistent locking order prevents mathematical cycles (deadlocks) under high concurrent load.
-* **Trade-offs:** 
-  Acquiring row locks (`FOR UPDATE`) locks specific products, which limits write throughput for a single product during active checkout. However, this is necessary to ensure strict data integrity.
+### Issue: Concurrency: Stock Allocation Race Condition
 
----
+- **Where:** `backend/src/services/ordersService.js:createOrder`
+- **Why:** Product stock check and stock decrement were executed in separate asynchronous database queries outside a transaction block.
+- **Impact:** Concurrent checkout requests could read outdated stock levels and buy products past their stock limit, driving stock into negative values. Failed multi-item checkouts did not roll back stock updates.
+- **Fix:** Wrapped the entire order execution inside a database transaction, locked product rows using `SELECT ... FOR UPDATE` before verification, and sorted the items by `productId` ascending to prevent deadlocks.
+- **Trade-offs:** Acquiring database row locks reduces checkout throughput for high-demand products under peak loads.
 
-## 2. SQL Injection Vulnerability in Products search
-* **Location:** `backend/src/repositories/productsRepository.js` inside `listProducts`.
-* **Issue:** 
-  The search parameter `q` was directly interpolated into the SQL query string (`WHERE name ILIKE '%${q}%' OR sku ILIKE '%${q}%'`), allowing malicious users to execute arbitrary SQL commands (e.g. leaking data, dropping tables).
-* **Fix:** 
-  Refactored the query to use parameterized queries (`WHERE name ILIKE $1 OR sku ILIKE $1` with values `[%${q}%]`).
-* **Trade-offs:** 
-  None. Parameterized queries are standard best practice.
+### Issue: SQL Injection in Product Search
 
----
+- **Where:** `backend/src/repositories/productsRepository.js:listProducts`
+- **Why:** Search query parameter `q` was directly interpolated into the SQL query string.
+- **Impact:** Malicious actors could inject SQL payloads to read sensitive database records or delete tables.
+- **Fix:** Refactored search to use parameterized queries (`WHERE name ILIKE $1 OR sku ILIKE $1` with values `[%${q}%]`).
+- **Trade-offs:** None.
 
-## 3. Double-Charging & Idempotency Key Race Condition
-* **Location:** `backend/src/services/ordersService.js` inside `chargeOrder`.
-* **Issue:** 
-  Checking for the idempotency key and charging the payment gateway was not atomic. If a user sent concurrent charge requests with the same key, both would check Redis, see it doesn't exist, proceed to charge the external payment gateway twice, and then save to Redis.
-  Even if they did not use an idempotency key, concurrent requests could target the same order, triggering duplicate payment gateway calls.
-* **Fix:** 
-  1. Implemented atomic Redis-based locking:
-     - An idempotency lock key: `idem:lock:${idempotencyKey}` using the atomic `SETNX` (`NX`) with a 30-second TTL.
-     - An order lock key: `lock:order:charge:${orderId}` to prevent multiple concurrent requests charging the same order with different/no keys.
-  2. Wrapped database actions (storing payments, updating order status to `PAID`) in `withTransaction` and performed `getOrderByIdForUpdate` to ensure status consistency.
-* **Trade-offs:** 
-  Requires a running Redis instance. In a serverless/container environment, Redis becomes a critical point of synchronization.
+### Issue: Double-Charging & Idempotency Key Race Condition
 
----
+- **Where:** `backend/src/services/ordersService.js:chargeOrder`
+- **Why:** Checking the idempotency key and sending the payment request to the provider were not atomic, and concurrent transactions targeting the same order were not locked.
+- **Impact:** Double clicks or network retries charged the customer multiple times.
+- **Fix:** Implemented atomic Redis-based locks (`set NX EX`) on both the idempotency key and the order ID, rejecting concurrent calls with `409 Conflict`.
+- **Trade-offs:** Requires an active Redis instance.
 
-## 4. Webhook Processing Duplication
-* **Location:** `backend/src/services/ordersService.js` (`processPaymentWebhook`) and `schema.sql`.
-* **Issue:** 
-  The `payment_events` table did not have a unique constraint on `provider_event_id`. Duplicate webhook requests sent by the payment provider would create duplicate entries in the database and run the `markOrderAsPaid` logic multiple times.
-* **Fix:** 
-  1. Added a `UNIQUE` constraint to `provider_event_id` in `schema.sql`.
-  2. Added a pre-check inside `processPaymentWebhook` using `FOR UPDATE` on `provider_event_id` to cleanly return `{ accepted: true, duplicate: true }` without crashing or throwing unique constraint violations.
-* **Trade-offs:** 
-  Pre-checking row existence under lock adds a small database query overhead, but prevents database unique violation error noise.
+### Issue: Unauthenticated & Duplicate Webhooks
+
+- **Where:** `backend/src/services/ordersService.js:processPaymentWebhook` & `backend/src/routes/paymentsRoutes.js`
+- **Why:** The webhook endpoint was fully public, and the `payment_events` table lacked unique constraints.
+- **Impact:** Anyone could fake payment success webhooks. Payment provider retry requests duplicated payment records and paid state updates.
+- **Fix:** timing-safe HMAC SHA-256 signature verification middleware and a unique database constraint on `provider_event_id`.
+- **Trade-offs:** Cryptographic verification adds minor CPU execution time per webhook.
+
+### Issue: Unauthenticated Admin Routes and Global Order Ledger Exposure
+
+- **Where:** `backend/src/routes/adminRoutes.js` & `backend/src/routes/ordersRoutes.js`
+- **Why:** Admin update endpoints and the global order listing lacked any authentication.
+- **Impact:** Customers could view other customers' private details and modify store product records.
+- **Fix:** Added `requireAdmin` middleware validating the `Authorization: Bearer <ADMIN_TOKEN>` header.
+- **Trade-offs:** None.
+
+### Issue: Mismatched Cart Total Mismatches (Price Spoofing)
+
+- **Where:** `backend/src/services/ordersService.js:createOrder`
+- **Why:** The server did not verify that the total amount submitted matched the actual price of the products in the database.
+- **Impact:** Clients could spoof order prices (e.g. purchasing a $1,000 product for $0.01).
+- **Fix:** Recalculated the expected total from database records on checkout and rejected mismatches.
+- **Trade-offs:** Extra database query per checkout.
 
 ---
 
-## 5. Broken Authentication & Data Exposure
-* **Locations:** `backend/src/routes/adminRoutes.js`, `backend/src/routes/ordersRoutes.js`, and `backend/src/routes/paymentsRoutes.js`.
-* **Issue:** 
-  1. The entire `/admin/*` product updating endpoints had no token verification.
-  2. The `GET /orders` endpoint (which lists all orders of all customers) was completely public, allowing any customer to view the global order ledger.
-  3. The payment webhook `/webhook` endpoint accepted arbitrary `POST` payloads without verifying origin or signatures.
-* **Fix:** 
-  1. Created a robust admin authorization middleware (`requireAdmin`) that validates headers matching `Authorization: Bearer <ADMIN_TOKEN>`.
-  2. Applied `requireAdmin` to `/admin/*` and the `GET /orders` endpoint.
-  3. Created `verifyWebhookSignature` middleware that calculates the HMAC SHA-256 signature of the payload using a shared `WEBHOOK_SECRET` and verifies it using `crypto.timingSafeEqual` to prevent timing attacks.
-* **Trade-offs:** 
-  Introduces cryptographic computational overhead on webhook requests.
+## Frontend
+
+### Issue: Cross-Site Scripting (XSS) in Product Detail Page
+
+- **Where:** `frontend/src/pages/ProductDetailPage.tsx`
+- **Why:** Rendered description using `dangerouslySetInnerHTML`.
+- **Impact:** Attackers who compromise product records could execute arbitrary javascript code in users' browsers.
+- **Fix:** Replaced with safe text child nodes (`<p>{product.description}</p>`).
+- **Trade-offs:** Descriptions can no longer contain formatted HTML.
+
+### Issue: Memory Leak in Order Polling
+
+- **Where:** `frontend/src/pages/OrderDetailPage.tsx`
+- **Why:** The `setInterval` polling hook had no cleanup function and continued fetching order details indefinitely.
+- **Impact:** Unnecessary network requests and browser memory leaks.
+- **Fix:** Returned a clearInterval cleanup function in the `useEffect` hook and cleared polling once the order transitioned to a terminal state (`PAID` or `FAILED`).
+- **Trade-offs:** None.
+
+### Issue: Search Key-press Race Conditions
+
+- **Where:** `frontend/src/pages/ProductsPage.tsx`
+- **Why:** Every keystroke immediately triggered a new fetch request.
+- **Impact:** Older slow network requests could overwrite newer search results.
+- **Fix:** Implemented a 300ms debounced search useEffect hook with an active request-cancellation flag.
+- **Trade-offs:** Small latency (300ms) introduced between typing and fetching.
+
+### Issue: Checkout Double-Submit
+
+- **Where:** `frontend/src/pages/CartPage.tsx`
+- **Why:** The checkout submit button remained active during processing.
+- **Impact:** Double clicks sent duplicate concurrent checkout requests.
+- **Fix:** Disabled the button and displayed a "Processing..." text while checkout API requests are pending.
+- **Trade-offs:** None.
 
 ---
 
-## 6. Money Handling & Float Precision Errors
-* **Locations:** Both Backend and Frontend (`ordersService.js`, `CartContext.tsx`, `ProductDetailPage.tsx`).
-* **Issue:** 
-  1. Frontend allowed checking out with floating-point calculations, potentially leading to errors like total amount `$59.970000000000006`.
-  2. Lack of backend validation allowed clients to submit arbitrary `totalAmount` payloads, meaning a malicious user could modify the total price of their order to `$0.01` before checkout.
-* **Fix:** 
-  1. Rounded totals to 2 decimal places using `Math.round(total * 100) / 100` on both stacks.
-  2. Validated `totalAmount` on the backend by summing the unit prices from database products multiplied by requested quantities and matching it within a `$0.01` epsilon.
-* **Trade-offs:** 
-  None. This is critical for preventing direct financial loss.
+## Cross-cutting
 
----
+### Issue: Floating Point Precision Errors
 
-## 7. Frontend Security: XSS Vulnerability
-* **Location:** `frontend/src/pages/ProductDetailPage.tsx`.
-* **Issue:** 
-  Used `dangerouslySetInnerHTML` directly with `product.description` without sanitization. An attacker with admin permissions (or via compromising the unauthenticated admin PATCH endpoint) could inject script tags into a product's description, executing code in any user's browser.
-* **Fix:** 
-  Replaced `dangerouslySetInnerHTML` with child text rendering: `<p className="description">{product.description}</p>`.
-* **Trade-offs:** 
-  Products can no longer display formatted HTML descriptions. If rich text is required, a proper sanitizer like DOMPurify should be introduced.
-
----
-
-## 8. Frontend Quality: Memory Leaks and Search Race Conditions
-* **Locations:** `OrderDetailPage.tsx`, `CartPage.tsx`, and `ProductsPage.tsx`.
-* **Issues:**
-  1. `OrderDetailPage` used `setInterval` to poll the order status but never cleared it on unmount or status updates, causing infinite background queries. It also had no error handling for payment failures.
-  2. `ProductsPage` triggered search queries on every key press, leading to fetch race conditions where slow older queries could overwrite faster newer ones.
-  3. `CartPage` allowed clicking checkout multiple times, sending multiple concurrent order creations.
-* **Fix:**
-  1. `OrderDetailPage`: Return cleanup callback to `clearInterval`, stop polling if status transitions to terminal states (`PAID`/`FAILED`), and wrapped payments in try/catch to display errors.
-  2. `ProductsPage`: Implemented a 300ms debounced search with an active cancellation flag.
-  3. `CartPage`: Implemented a `checkingOut` loading state to disable the button during API execution.
+- **Where:** Backend (`ordersService.js`) & Frontend (`CartContext.tsx` / `ProductDetailPage.tsx`)
+- **Why:** Fractional calculations with standard javascript floats.
+- **Impact:** Broken cart arithmetic (e.g. totals displaying as `$39.980000000000004`).
+- **Fix:** Rounded all currency calculations to 2 decimal places: `Math.round(total * 100) / 100`.
+- **Trade-offs:** None.
