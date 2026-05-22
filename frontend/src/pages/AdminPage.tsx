@@ -77,7 +77,6 @@ export default function AdminPage() {
             : it,
         ),
       );
-      // Clear editing state for this product
       setEditing((prev) => {
         const copy = { ...prev };
         delete copy[p.id];

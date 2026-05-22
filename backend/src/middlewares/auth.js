@@ -26,7 +26,6 @@ function verifyWebhookSignature(req, res, next) {
     return res.status(401).json({ error: "Missing webhook signature" });
   }
 
-  // Calculate HMAC SHA256 of the raw body/stringified body
   const payload = JSON.stringify(req.body);
   const expectedSignature = crypto
     .createHmac("sha256", WEBHOOK_SECRET)

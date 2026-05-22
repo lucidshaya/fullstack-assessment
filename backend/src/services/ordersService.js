@@ -27,7 +27,6 @@ async function createOrder({ customerId, items, totalAmount }) {
     throw error;
   }
 
-  // Sort items by productId to guarantee consistent locking order and prevent deadlocks
   const sortedItems = [...items].sort((a, b) => Number(a.productId) - Number(b.productId));
 
   return withTransaction(async (client) => {
@@ -39,7 +38,6 @@ async function createOrder({ customerId, items, totalAmount }) {
         throw error;
       }
 
-      // Lock row to prevent concurrent stock modifications
       const product = await productsRepository.getProductByIdForUpdate(item.productId, client);
       if (!product) {
         const error = new Error(`Product ${item.productId} not found`);
@@ -58,7 +56,6 @@ async function createOrder({ customerId, items, totalAmount }) {
       });
     }
 
-    // Calculate total amount based on DB price to prevent client-side manipulation
     let calculatedTotal = 0;
     for (const item of enrichedItems) {
       calculatedTotal += item.quantity * item.unitPrice;
@@ -96,7 +93,6 @@ async function chargeOrder({ orderId, idempotencyKey }) {
       return JSON.parse(cached);
     }
 
-    // Acquire lock for idempotency key to handle concurrent requests with the same key
     const lockKey = `idem:lock:${idempotencyKey}`;
     const acquired = await redis.set(lockKey, "processing", "NX", "EX", 30);
     if (!acquired) {
@@ -106,7 +102,6 @@ async function chargeOrder({ orderId, idempotencyKey }) {
     }
   }
 
-  // Acquire order charge lock to prevent concurrent checkout on same order
   const orderLockKey = `lock:order:charge:${orderId}`;
   const orderLockAcquired = await redis.set(orderLockKey, "processing", "NX", "EX", 30);
   if (!orderLockAcquired) {
@@ -184,7 +179,6 @@ async function processPaymentWebhook({
   payload,
 }) {
   return withTransaction(async (client) => {
-    // Check if event already exists
     const existing = await client.query(
       "SELECT id FROM payment_events WHERE provider_event_id = $1 FOR UPDATE",
       [providerEventId],
@@ -201,7 +195,6 @@ async function processPaymentWebhook({
         payload,
       }, client);
     } catch (err) {
-      // If unique violation error code
       if (err.code === "23505") {
         return { accepted: true, duplicate: true };
       }

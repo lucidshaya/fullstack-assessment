@@ -8,13 +8,11 @@ const { ADMIN_TOKEN, WEBHOOK_SECRET } = require("./config/env");
 
 describe("API & Services Integration Tests", () => {
   let testOrderId;
-  let testProductId = 1; // from seed
+  let testProductId = 1;
 
   beforeAll(async () => {
-    // Clear locks and relevant test data
     await redis.flushdb();
     
-    // Create a clean order for testing
     let product;
     const { rows } = await pool.query("SELECT * FROM products LIMIT 1");
     if (rows.length === 0) {
@@ -46,7 +44,6 @@ describe("API & Services Integration Tests", () => {
   });
 
   afterAll(async () => {
-    // Clean up test order
     if (testOrderId) {
       await pool.query("DELETE FROM payment_events WHERE order_id = $1", [testOrderId]);
       await pool.query("DELETE FROM payments WHERE order_id = $1", [testOrderId]);
@@ -147,7 +144,6 @@ describe("API & Services Integration Tests", () => {
         .update(payloadString)
         .digest("hex");
 
-      // First webhook processes event
       const res1 = await request(app)
         .post("/payments/webhook")
         .set("X-Webhook-Signature", signature)
@@ -155,7 +151,6 @@ describe("API & Services Integration Tests", () => {
       expect(res1.status).toBe(200);
       expect(res1.body.duplicate).toBeUndefined();
 
-      // Second webhook should mark as duplicate without crashing or creating duplicate DB entries
       const res2 = await request(app)
         .post("/payments/webhook")
         .set("X-Webhook-Signature", signature)
@@ -171,7 +166,7 @@ describe("API & Services Integration Tests", () => {
         ordersService.createOrder({
           customerId: "cust_test",
           items: [{ productId: testProductId, quantity: 1 }],
-          totalAmount: 9999.99, // Mismatched price
+          totalAmount: 9999.99,
         })
       ).rejects.toThrow("Order total mismatch");
     });
@@ -197,14 +192,12 @@ describe("API & Services Integration Tests", () => {
 
   describe("Idempotency Lock / Concurrency in Order Charging", () => {
     it("should reject concurrent charges on the same order with 409 Conflict", async () => {
-      // Setup a fresh pending order for testing charge concurrency
       const orderRes = await pool.query(
         `INSERT INTO orders (customer_id, total_amount, status)
          VALUES ('customer_concurrent', 10.0, 'PENDING') RETURNING id`
       );
       const currentOrderId = parseInt(orderRes.rows[0].id);
 
-      // Trigger concurrent charge calls
       const p1 = request(app)
         .post("/payments/charge")
         .set("Idempotency-Key", `idem_key_conc_${currentOrderId}`)
@@ -217,12 +210,10 @@ describe("API & Services Integration Tests", () => {
 
       const [res1, res2] = await Promise.all([p1, p2]);
 
-      // One should succeed, and the other should fail with a 409 Conflict
       const statuses = [res1.status, res2.status];
       expect(statuses).toContain(200);
       expect(statuses).toContain(409);
 
-      // Clean up order
       await pool.query("DELETE FROM payments WHERE order_id = $1", [currentOrderId]);
       await pool.query("DELETE FROM orders WHERE id = $1", [currentOrderId]);
     });
