@@ -6,3 +6,6 @@ coverage
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# Reviewer-only: full bug catalog and scoring rubric. Never commit.
+AssessmentOverview.md
