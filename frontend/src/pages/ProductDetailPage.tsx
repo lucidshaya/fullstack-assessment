@@ -22,10 +22,15 @@ export default function ProductDetailPage() {
 
   async function buyNow() {
     if (!product) return;
+    const validatedQty = Math.max(1, Math.floor(quantity));
+    if (validatedQty > product.stock) {
+      alert(`Cannot buy more than ${product.stock} items of ${product.name}`);
+      return;
+    }
     const order = await createOrder({
       customerId: "customer_001",
-      items: [{ productId: product.id, quantity }],
-      totalAmount: parseFloat(product.price) * quantity,
+      items: [{ productId: product.id, quantity: validatedQty }],
+      totalAmount: Math.round(parseFloat(product.price) * validatedQty * 100) / 100,
     });
     navigate(`/orders/${order.id}`);
   }
@@ -34,10 +39,7 @@ export default function ProductDetailPage() {
     <div className="page">
       <h1>{product.name}</h1>
       <p className="sku">{product.sku}</p>
-      <div
-        className="description"
-        dangerouslySetInnerHTML={{ __html: product.description }}
-      />
+      <p className="description">{product.description}</p>
       <p className="price">${product.price}</p>
       <p className="stock">
         {product.stock > 0 ? `${product.stock} in stock` : "Out of stock"}

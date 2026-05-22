@@ -1,5 +1,6 @@
 const express = require("express");
 const ordersService = require("../services/ordersService");
+const { verifyWebhookSignature } = require("../middlewares/auth");
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ router.post("/charge", async (req, res, next) => {
   }
 });
 
-router.post("/webhook", async (req, res, next) => {
+router.post("/webhook", verifyWebhookSignature, async (req, res, next) => {
   try {
     const { providerEventId, orderId, eventType, payload } = req.body;
     const result = await ordersService.processPaymentWebhook({

@@ -24,10 +24,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const add = useCallback((product: Product, quantity = 1) => {
     setItems((current) => {
       const existing = current.find((i) => i.productId === product.id);
+      const currentQty = existing ? existing.quantity : 0;
+      const newQty = currentQty + quantity;
+
+      if (newQty > product.stock) {
+        alert(`Cannot add more than ${product.stock} items of ${product.name} to the cart.`);
+        return current;
+      }
+
       if (existing) {
         return current.map((i) =>
           i.productId === product.id
-            ? { ...i, quantity: i.quantity + quantity }
+            ? { ...i, quantity: newQty }
             : i,
         );
       }
@@ -50,7 +58,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const clear = useCallback(() => setItems([]), []);
 
   const total = useMemo(
-    () => items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+    () => Math.round(items.reduce((sum, i) => sum + i.price * i.quantity, 0) * 100) / 100,
     [items],
   );
 

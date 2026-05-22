@@ -51,22 +51,26 @@ export function chargeOrder(orderId: number): Promise<{ order: Order }> {
   });
 }
 
+function getAdminToken(): string {
+  return localStorage.getItem("admin_token") ?? import.meta.env.VITE_ADMIN_TOKEN ?? "";
+}
+
 export function listOrdersAdmin(): Promise<Order[]> {
-  return request<Order[]>(`/orders`);
+  return request<Order[]>(`/orders`, {
+    headers: {
+      Authorization: `Bearer ${getAdminToken()}`,
+    },
+  });
 }
 
 export function updateProductAdmin(
   id: number,
   body: { price?: number; stock?: number; description?: string; name?: string },
 ): Promise<Product> {
-  const token =
-    localStorage.getItem("admin_token") ??
-    import.meta.env.VITE_ADMIN_TOKEN ??
-    "";
   return request<Product>(`/admin/products/${id}`, {
     method: "PATCH",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${getAdminToken()}`,
     },
     body: JSON.stringify(body),
   });

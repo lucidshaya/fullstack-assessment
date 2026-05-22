@@ -1,7 +1,10 @@
 const express = require("express");
 const productsRepository = require("../repositories/productsRepository");
+const { requireAdmin } = require("../middlewares/auth");
 
 const router = express.Router();
+
+router.use(requireAdmin);
 
 router.post("/products", async (req, res, next) => {
   try {

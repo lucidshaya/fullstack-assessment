@@ -8,20 +8,30 @@ export default function ProductsPage() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await listProducts(q);
-      setProducts(data);
-    } catch (err) {
-      console.error(err);
-    }
-    setLoading(false);
-  }
-
   useEffect(() => {
-    load();
-  }, []);
+    let active = true;
+    setLoading(true);
+
+    const debounceId = setTimeout(async () => {
+      try {
+        const data = await listProducts(q);
+        if (active) {
+          setProducts(data);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      active = false;
+      clearTimeout(debounceId);
+    };
+  }, [q]);
 
   return (
     <div className="page">
@@ -31,10 +41,7 @@ export default function ProductsPage() {
           type="text"
           value={q}
           placeholder="Search products"
-          onChange={(e) => {
-            setQ(e.target.value);
-            load();
-          }}
+          onChange={(e) => setQ(e.target.value)}
         />
       </div>
       {loading && <p>Loading...</p>}

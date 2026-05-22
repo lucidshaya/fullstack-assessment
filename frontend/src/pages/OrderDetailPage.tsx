@@ -8,22 +8,66 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [paying, setPaying] = useState(false);
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!id) return;
-    getOrder(id).then(setOrder);
+    
+    let active = true;
+    let intervalId: any = null;
 
-    setInterval(() => {
-      getOrder(id).then(setOrder);
+    const fetchOrder = () => {
+      getOrder(id)
+        .then((data) => {
+          if (!active) return;
+          setOrder(data);
+          if (data.status !== "PENDING" && intervalId) {
+            clearInterval(intervalId);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch order", err);
+        });
+    };
+
+    fetchOrder();
+
+    intervalId = setInterval(() => {
+      getOrder(id)
+        .then((data) => {
+          if (!active) return;
+          setOrder(data);
+          if (data.status !== "PENDING") {
+            clearInterval(intervalId);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch order during interval", err);
+        });
     }, 2000);
+
+    return () => {
+      active = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [id]);
 
   if (!order) return <p>Loading order...</p>;
 
   async function pay() {
+    if (paying) return;
     setPaying(true);
-    const result = await chargeOrder(order!.id);
-    setOrder(result.order);
-    setPaying(false);
+    setError(null);
+    try {
+      const result = await chargeOrder(order!.id);
+      setOrder(result.order);
+    } catch (err: any) {
+      setError(err.message || "Payment declined. Please try again.");
+    } finally {
+      setPaying(false);
+    }
   }
 
   return (
@@ -53,8 +97,10 @@ export default function OrderDetailPage() {
         ))}
       </ul>
 
+      {error && <div className="error-message" style={{ color: "red", margin: "10px 0" }}>{error}</div>}
+
       {order.status === "PENDING" && (
-        <button className="primary" onClick={pay}>
+        <button className="primary" onClick={pay} disabled={paying}>
           {paying ? "Charging..." : "Pay now"}
         </button>
       )}
