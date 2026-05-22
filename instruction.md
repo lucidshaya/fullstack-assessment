@@ -15,26 +15,31 @@ them and fix them.
 
 ### What to do
 
-1. Clone the repo and follow the README to run it locally
-   (`docker compose up -d`, then `npm install && npm run dev` in both
-   `backend/` and `frontend/`).
-2. Identify as many issues as you can. Focus areas: data integrity,
+1. **Fork** [`heimdallinc/fullstack-assessment`](https://github.com/heimdallinc/fullstack-assessment)
+   on GitHub, then clone your fork locally. Work on a branch in your fork.
+2. Follow the README to run it (`docker compose up -d`, then
+   `npm install && npm run dev` in both `backend/` and `frontend/`).
+3. Identify as many issues as you can. Focus areas: data integrity,
    concurrency, idempotency, authentication / authorization, money
    handling, XSS, frontend state correctness, error handling, and
    accessibility.
-3. Fix the issues with production-appropriate changes.
-4. Add tests proving the fix for at least the highest-impact backend
+4. Fix the issues with production-appropriate changes.
+5. Add tests proving the fix for at least the highest-impact backend
    bugs (concurrency, idempotency, auth) and at least one frontend bug.
-5. Submit:
+6. Add to your fork:
    - `FINDINGS.md` - what you found, why it happens, your fix, and
      remaining trade-offs
    - `AI_NOTES.md` - your AI usage notes (see below, this is required)
    - All test files and any infra changes
+7. Open a pull request from your fork's branch to
+   `heimdallinc/fullstack-assessment` `main` (see Submission below).
 
 ### Time and deadline
 
 - Up to 8 hours of focused work. Do not exceed this.
-- Submit within **5 calendar days** of receiving this brief.
+- Submit within **48 hours** of receiving this brief. The PR open time
+  is what we go by, so open the PR even if you are still polishing -
+  you can keep pushing commits to the same PR until the deadline.
 - We would rather see fewer issues fixed well, with tests and reasoning,
   than every issue half-fixed. Note clearly in `FINDINGS.md` anything
   you spotted but did not fix, and why.
@@ -83,17 +88,37 @@ not just your diff.
 
 ### Submission
 
-- Push your work to a **private Git repo** and share access with us, or
-  send a zip.
-- Make sure `node_modules`, `.env`, and build output are excluded.
-- Reply to the email you received with the repo link or zip, your
-  `FINDINGS.md`, and your `AI_NOTES.md`.
+Submit your work as a **pull request** from your fork to
+`heimdallinc/fullstack-assessment` `main`.
+
+Steps:
+
+1. Fork [`heimdallinc/fullstack-assessment`](https://github.com/heimdallinc/fullstack-assessment).
+2. Create a branch in your fork (e.g. `submission/<your-name>`).
+3. Commit your fixes, tests, `FINDINGS.md`, and `AI_NOTES.md`.
+4. Push the branch to your fork.
+5. Open a PR from `your-username/fullstack-assessment:submission/<your-name>`
+   to `heimdallinc/fullstack-assessment:main`.
+6. Title the PR `Submission - <Your Full Name>`.
+7. In the PR description include:
+   - A short summary of your approach
+   - A link to `FINDINGS.md` and `AI_NOTES.md` in your branch
+   - Any setup quirks the reviewer should know about
+8. Reply to the email you received with the PR link.
+
+Notes:
+
+- Make sure `node_modules`, `.env`, and build output are not committed
+  (the repo's `.gitignore` already excludes them - keep it that way).
+- Do not force-push or rebase the branch after the deadline.
+- We take the PR's open timestamp as your submission time.
 
 ### Ground rules
 
 - Work on this on your own. Do not pair with another engineer.
 - Do not publish the assessment, your solution, or your `AI_NOTES.md` in
-  a public repo, gist, or blog post. Keep the repo private.
+  a public blog post, gist, social media thread, or any forum. Your
+  fork on GitHub is fine and expected. Do not advertise it.
 - Reasonable use of search engines, official docs, Stack Overflow, and
   AI tools is expected and encouraged.
 
